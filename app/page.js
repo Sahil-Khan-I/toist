@@ -1,15 +1,99 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+
+// Memoized TodoItem component for better performance
+const TodoItem = ({ todo, onToggle, onDelete }) => {
+  const createdDate = useMemo(() => formatDate(todo.createdAt), [todo.createdAt]);
+  const completedDate = useMemo(() => 
+    todo.completedAt ? formatDate(todo.completedAt) : null, 
+    [todo.completedAt]
+  );
+
+  return (
+    <li className="todo-item">
+      <div className="card p-4 flex items-start gap-4 hover:shadow-md transition-shadow">
+        <button
+          onClick={() => onToggle(todo.id)}
+          className={`checkbox mt-1 ${todo.completed ? 'checked' : ''}`}
+          aria-checked={todo.completed}
+          aria-label={`Mark "${todo.text}" as ${todo.completed ? 'incomplete' : 'complete'}`}
+        >
+          {todo.completed && (
+            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+            </svg>
+          )}
+        </button>
+        
+        <div className="flex-1 min-w-0">
+          <p className={`text-sm font-medium transition-all ${
+            todo.completed
+              ? 'line-through text-muted-foreground'
+              : 'text-foreground'
+          }`}>
+            {todo.text}
+          </p>
+          <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
+            <span>Created {createdDate}</span>
+            {todo.completed && completedDate && (
+              <>
+                <span>•</span>
+                <span>Completed {completedDate}</span>
+              </>
+            )}
+          </div>
+        </div>
+        
+        <button
+          onClick={() => onDelete(todo.id)}
+          className="btn btn-ghost btn-sm text-destructive hover:bg-destructive/10"
+          aria-label={`Delete "${todo.text}"`}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+        </button>
+      </div>
+    </li>
+  );
+};
+
+// Helper function for date formatting
+const formatDate = (dateString) => {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffInHours = (now - date) / (1000 * 60 * 60);
+
+  if (diffInHours < 1) {
+    const diffInMinutes = Math.floor((now - date) / (1000 * 60));
+    return diffInMinutes <= 1 ? 'just now' : `${diffInMinutes} minutes ago`;
+  } else if (diffInHours < 24) {
+    const hours = Math.floor(diffInHours);
+    return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+  } else if (diffInHours < 48) {
+    return 'yesterday';
+  } else {
+    return date.toLocaleDateString();
+  }
+};
 
 export default function Toist() {
   const [todos, setTodos] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [isClient, setIsClient] = useState(false);
+
+  // Ensure we're on the client side before accessing localStorage
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   // Load todos from localStorage on component mount with error handling
   useEffect(() => {
+    if (!isClient) return;
+    
     try {
       const savedTodos = localStorage.getItem('toist-todos');
       if (savedTodos) {
@@ -22,10 +106,12 @@ export default function Toist() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isClient]);
 
   // Save todos to localStorage whenever todos change with error handling
   const saveTodos = useCallback((newTodos) => {
+    if (!isClient) return;
+    
     try {
       localStorage.setItem('toist-todos', JSON.stringify(newTodos));
       setError(''); // Clear any previous errors
@@ -33,13 +119,18 @@ export default function Toist() {
       console.error("Error saving todos to localStorage:", error);
       setError("Failed to save todos. Your changes may not persist.");
     }
-  }, []);
+  }, [isClient]);
 
   useEffect(() => {
-    if (!isLoading) {
+    if (!isLoading && isClient) {
       saveTodos(todos);
     }
-  }, [todos, isLoading, saveTodos]);
+  }, [todos, isLoading, isClient, saveTodos]);
+
+  // Generate a more robust unique ID
+  const generateId = useCallback(() => {
+    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }, []);
 
   const addTodo = () => {
     const trimmedValue = inputValue.trim();
@@ -57,13 +148,12 @@ export default function Toist() {
 
     // Generate more robust ID using timestamp + random component
     const newTodo = {
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: generateId(),
       text: trimmedValue,
       completed: false,
-      createdAt: new Date().toISOString()
-    };
-    
-    setTodos([...todos, newTodo]);
+      createdAt: new Date().toISOString(),
+      completedAt: null
+    };    setTodos([...todos, newTodo]);
     setInputValue('');
     setError('');
   };
@@ -101,26 +191,6 @@ export default function Toist() {
   const completedCount = todos.filter(todo => todo.completed).length;
   const activeCount = todos.length - completedCount;
 
-  // Helper function to format dates for display
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffInSeconds = Math.floor((now - date) / 1000);
-    
-    if (diffInSeconds < 60) {
-      return 'just now';
-    } else if (diffInSeconds < 3600) {
-      const minutes = Math.floor(diffInSeconds / 60);
-      return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
-    } else if (diffInSeconds < 86400) {
-      const hours = Math.floor(diffInSeconds / 3600);
-      return `${hours} hour${hours === 1 ? '' : 's'} ago`;
-    } else {
-      const days = Math.floor(diffInSeconds / 86400);
-      return `${days} day${days === 1 ? '' : 's'} ago`;
-    }
-  };
-
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
@@ -129,127 +199,142 @@ export default function Toist() {
     );
   }
 
+  // Don't render until we're on the client side to prevent hydration mismatch
+  if (!isClient) {
+    return null;
+  }
+
   return (
-    <div className="app-container min-h-screen bg-gray-50 dark:bg-gray-900 py-8 px-4">
-      <div className="max-w-md mx-auto">
+    <div className="app-container min-h-screen bg-background p-8">
+      <div className="max-w-2xl mx-auto">
         {/* Header */}
-        <header className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-800 dark:text-gray-200 mb-2">
-            Toist
-          </h1>
-          <p className="text-gray-600 dark:text-gray-400">
-            Simple browser-based todo list
-          </p>
+        <header className="text-center mb-12">
+          <div className="space-y-4">
+            <h1 className="text-6xl font-bold text-foreground tracking-tight">
+              Toist
+            </h1>
+            <p className="text-xl text-muted-foreground max-w-md mx-auto">
+              A beautifully simple todo list to keep you organized and productive
+            </p>
+            <div className="w-24 h-1 bg-primary mx-auto rounded-full"></div>
+          </div>
         </header>
 
-        {/* Error Message */}
-        {error && (
-          <div className="mb-4 p-3 bg-red-100 dark:bg-red-900 border border-red-300 dark:border-red-700 rounded-lg text-red-700 dark:text-red-300 text-sm">
-            {error}
-          </div>
-        )}
+        {/* Main Content Card */}
+        <div className="card p-8 space-y-8">
+          {/* Error Message */}
+          {error && (
+            <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+              <p className="text-destructive text-sm font-medium">{error}</p>
+            </div>
+          )}
 
         {/* Add Todo Input */}
-        <section className="mb-6" aria-label="Add new todo">
-          <div className="flex gap-2">
-            <label htmlFor="todo-input" className="sr-only">
-              Enter a new task
-            </label>
-            <input
-              id="todo-input"
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="Add a new task..."
-              maxLength={200}
-              aria-describedby={error ? "error-message" : "task-hint"}
-              className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-gray-200"
-            />
-            <button
-              onClick={addTodo}
-              className="add-btn px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
-              aria-label="Add todo"
-            >
-              Add
-            </button>
-          </div>
-          <div id="task-hint" className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {inputValue.length}/200 characters
-          </div>
-        </section>
-
-        {/* Todo List */}
-        <main className="todo-grid bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-          {todos.length === 0 ? (
-            <div className="p-6 text-center text-gray-500 dark:text-gray-400">
-              No tasks yet. Add one above!
-            </div>
-          ) : (
-            <ul className="divide-y divide-gray-200 dark:divide-gray-700" role="list" aria-label="Todo list">
-              {todos.map((todo) => (
-                <li key={todo.id} className="todo-item p-4">
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="checkbox"
-                      checked={todo.completed}
-                      onChange={() => toggleTodo(todo.id)}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      aria-label={`Mark "${todo.text}" as ${todo.completed ? 'incomplete' : 'complete'}`}
-                    />
-                    <div className="flex-1">
-                      <span
-                        className={`block ${
-                          todo.completed
-                            ? 'line-through text-gray-500 dark:text-gray-400'
-                            : 'text-gray-900 dark:text-gray-100'
-                        }`}
-                      >
-                        {todo.text}
-                      </span>
-                      <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                        <span>Created {formatDate(todo.createdAt)}</span>
-                        {todo.completed && todo.completedAt && (
-                          <span className="ml-2">• Completed {formatDate(todo.completedAt)}</span>
-                        )}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => deleteTodo(todo.id)}
-                      className="delete-btn text-red-500 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 rounded px-2 py-1"
-                      aria-label={`Delete "${todo.text}"`}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </main>
-
-        {/* Stats and Actions */}
-        {todos.length > 0 && (
-          <section className="mt-4 flex justify-between items-center text-sm text-gray-600 dark:text-gray-400" aria-label="Todo statistics">
-            <div role="status" aria-live="polite">
-              {activeCount} active, {completedCount} completed
-            </div>
-            {completedCount > 0 && (
+        <div className="space-y-6">
+          {/* Add Todo Section */}
+          <div className="space-y-4">
+            <h2 className="text-xl font-semibold text-foreground">Add New Task</h2>
+            <form onSubmit={(e) => { e.preventDefault(); addTodo(); }} className="flex gap-3">
+              <input
+                type="text"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                placeholder="What needs to be done?"
+                className="input flex-1"
+                disabled={isLoading}
+                aria-label="Enter new todo item"
+                maxLength={500}
+              />
               <button
-                onClick={clearCompleted}
-                className="text-red-500 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 rounded px-2 py-1"
-                aria-label={`Clear ${completedCount} completed tasks`}
+                type="submit"
+                disabled={isLoading || inputValue.trim() === ''}
+                className="btn btn-primary btn-lg px-8"
+                aria-label="Add todo item"
               >
-                Clear completed
+                Add Task
               </button>
+            </form>
+            {inputValue.length > 450 && (
+              <p className="text-sm text-muted-foreground">
+                {500 - inputValue.length} characters remaining
+              </p>
             )}
-          </section>
-        )}
+          </div>
+
+          {/* Todo List Section */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-foreground">
+                {todos.length === 0 ? 'Your tasks' : `Tasks (${todos.length})`}
+              </h2>
+              {todos.length > 0 && (
+                <div className="flex gap-2">
+                  <span className="badge badge-secondary">
+                    {activeCount} active
+                  </span>
+                  {completedCount > 0 && (
+                    <span className="badge badge-default">
+                      {completedCount} done
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {isLoading ? (
+              <div className="text-center py-12">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                <p className="text-muted-foreground mt-2">Loading your tasks...</p>
+              </div>
+            ) : todos.length === 0 ? (
+              <div className="text-center py-16 space-y-4">
+                <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto">
+                  <svg className="w-8 h-8 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-medium text-foreground">All caught up!</h3>
+                  <p className="text-muted-foreground">Add your first task above to get started</p>
+                </div>
+              </div>
+            ) : (
+              <ul className="space-y-3" role="list" aria-label="Todo items">
+                {todos.map((todo) => (
+                  <TodoItem
+                    key={todo.id}
+                    todo={todo}
+                    onToggle={toggleTodo}
+                    onDelete={deleteTodo}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Actions Section */}
+          {todos.length > 0 && completedCount > 0 && (
+            <div className="pt-4 border-t border-border">
+              <div className="flex justify-center">
+                <button
+                  onClick={clearCompleted}
+                  className="btn btn-ghost text-destructive hover:bg-destructive/10"
+                  aria-label={`Clear ${completedCount} completed tasks`}
+                >
+                  Clear {completedCount} completed task{completedCount !== 1 ? 's' : ''}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Footer */}
-        <footer className="mt-8 text-center text-xs text-gray-500 dark:text-gray-400">
-          Data stored locally in your browser
+        <footer className="mt-12 text-center">
+          <p className="text-sm text-muted-foreground">
+            ✨ Data saved locally in your browser ✨
+          </p>
         </footer>
+        </div>
       </div>
     </div>
   );
