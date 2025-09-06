@@ -191,14 +191,6 @@ export default function Toist() {
   const completedCount = todos.filter(todo => todo.completed).length;
   const activeCount = todos.length - completedCount;
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <div className="text-gray-600 dark:text-gray-400">Loading your todos...</div>
-      </div>
-    );
-  }
-
   // Don't render until we're on the client side to prevent hydration mismatch
   if (!isClient) {
     return null;
